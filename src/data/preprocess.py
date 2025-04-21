@@ -243,111 +243,89 @@ def inspect_layer_properties(gdb_path, layer_name):
     
     return gdf
 
-def gdb_to_geojson(gdb_path, layer_name, output_path):
+def convert_layer_to_long_format(gdb_path, layer_name):
     """
-    Transforms a UNOSAT GDB layer into a GeoJSON format similar to the https://github.com/prs-eth/ukraine-damage-mapping-tool/blob/main/data/unosat_labels.geojson.
+    Converts a GDB layer from wide format to long format, where each row represents
+    a unique point observation at a specific epoch.
     
     Parameters:
     -----------
     gdb_path : str
         Path to the GDB file
     layer_name : str
-        Name of the layer in the GDB
-    output_path : str
-        Path to save the output GeoJSON file
+        Name of the layer within the GDB
+        
+    Returns:
+    --------
+    pd.DataFrame
+        Long format dataframe with each row representing a point at a specific epoch
     """
     # Read the GDB layer
+    print(f"Reading layer: {layer_name} from {gdb_path}")
     gdf = gpd.read_file(gdb_path, layer=layer_name)
     
-    # Initialize empty list to store features
-    features = []
+    # Generate a unique ID for each point since there's no explicit ID
+    # Using the geometry as part of the ID since it's unique for each point
+    gdf['point_id'] = [f"p{i}" for i in range(len(gdf))]
     
-    # Loop through each point in the GDB
-    for idx, row in gdf.iterrows():
-        # Get the base geometry
-        geom = row['geometry']
+    # Keep track of the original geometries and location info
+    location_cols = ['Governorate', 'Municipality', 'Neighborhood', 'geometry']
+    locations = gdf[['point_id'] + location_cols].copy()
+    
+    # Create an empty list to store dataframes for each epoch
+    epoch_dfs = []
+    
+    # Process each epoch (1-11)
+    # Note: First epoch seems to have different column naming pattern
+    # For epoch 1, the columns don't have a suffix
+    epoch1_df = gdf[['point_id', 'SensorDate', 'SensorID', 'ConfidenceID', 'Main_Damage_Site_Class']].copy()
+    # Only keep rows where SensorDate is not null
+    epoch1_df = epoch1_df[~pd.isna(epoch1_df['SensorDate'])].copy()
+    if not epoch1_df.empty:
+        epoch1_df['epoch'] = 1
+        epoch1_df.rename(columns={
+            'SensorDate': 'date',
+            'SensorID': 'sensor_id',
+            'ConfidenceID': 'confidence_id',
+            'Main_Damage_Site_Class': 'damage_class'
+        }, inplace=True)
+        epoch_dfs.append(epoch1_df)
+    
+    # For epochs 2-11, the columns have numeric suffixes
+    for i in range(2, 12):
+        date_col = f'SensorDate_{i}'
+        sensor_id_col = f'SensorID_{i}'
+        confidence_id_col = f'ConfidenceID_{i}'
+        damage_class_col = f'Main_Damage_Site_Class_{i}'
+        damage_status_col = f'Damage_Status_{i}'
         
-        # Prepare the basic properties
-        base_properties = {
-            "unosat_id": row['SiteID'],
-            "city": row['Municipality'],
-            "country": "Palestine",
-            "gdb": row['EventCode'],
-            "layer": f"Gaza_CDA_{row['SensorDate_11'].strftime('%Y%m%d')}" if pd.notna(row['SensorDate_11']) else None,
-        }
+        # Only select rows where the date is not null for this epoch
+        epoch_df = gdf[['point_id', date_col, sensor_id_col, confidence_id_col, 
+                         damage_class_col, damage_status_col]].copy()
+        epoch_df = epoch_df[~pd.isna(epoch_df[date_col])].copy()
         
-        # Get additional geographic properties
-        if pd.notna(row['Governorate']):
-            base_properties["governorate"] = row['Governorate']
-        if pd.notna(row['Municipality']):
-            base_properties["municipality"] = row['Municipality']
-        if pd.notna(row['Neighborhood']):
-            base_properties["neighborhood"] = row['Neighborhood']
+        if not epoch_df.empty:
+            epoch_df['epoch'] = i
+            epoch_df.rename(columns={
+                date_col: 'date',
+                sensor_id_col: 'sensor_id',
+                confidence_id_col: 'confidence_id',
+                damage_class_col: 'damage_class',
+                damage_status_col: 'damage_status'
+            }, inplace=True)
+            epoch_dfs.append(epoch_df)
+    
+    # Combine all epoch dataframes
+    if epoch_dfs:
+        long_df = pd.concat(epoch_dfs, ignore_index=True)
         
-        # Process each epoch (time period) where data exists
-        for ep in range(1, 12):  # 11 epochs in the dataset
-            sensor_date_col = f'SensorDate_{ep}' if ep > 1 else 'SensorDate'
-            damage_class_col = f'Main_Damage_Site_Class_{ep}' if ep > 1 else 'Main_Damage_Site_Class'
-            
-            # Skip if no data for this epoch
-            if pd.isna(row.get(sensor_date_col)):
-                continue
-                
-            # Create properties for this epoch
-            props = base_properties.copy()
-            props["ep"] = ep
-            
-            # Add date
-            date_val = row.get(sensor_date_col)
-            if pd.notna(date_val):
-                props["date"] = date_val.isoformat()
-            
-            # Add damage value
-            damage_val = row.get(damage_class_col)
-            if pd.notna(damage_val):
-                props["damage"] = int(damage_val) if isinstance(damage_val, (int, float)) else damage_val
-            
-            # Add previous damage and date if not the first epoch
-            if ep > 1:
-                prev_ep = ep - 1
-                prev_date_col = f'SensorDate_{prev_ep}' if prev_ep > 1 else 'SensorDate'
-                prev_damage_col = f'Main_Damage_Site_Class_{prev_ep}' if prev_ep > 1 else 'Main_Damage_Site_Class'
-                
-                prev_date = row.get(prev_date_col)
-                prev_damage = row.get(prev_damage_col)
-                
-                props["prev_date"] = prev_date.isoformat() if pd.notna(prev_date) else None
-                props["prev_damage"] = int(prev_damage) if pd.notna(prev_damage) and isinstance(prev_damage, (int, float)) else -99
-            else:
-                props["prev_date"] = None
-                props["prev_damage"] = -99
-            
-            # Create the GeoJSON feature
-            feature = {
-                "type": "Feature",
-                "properties": props,
-                "geometry": {
-                    "type": "Point",
-                    "coordinates": [geom.x, geom.y]  # longitude, latitude
-                }
-            }
-            
-            features.append(feature)
-    
-    # Create the GeoJSON FeatureCollection
-    geojson = {
-        "type": "FeatureCollection",
-        "name": "unosat_labels",
-        "crs": {
-            "type": "name", 
-            "properties": {"name": "urn:ogc:def:crs:OGC:1.3:CRS84"}
-        },
-        "features": features
-    }
-    
-    # Write to file
-    with open(output_path, 'w') as f:
-        json.dump(geojson, f)
-    
-    print(f"Successfully converted to GeoJSON with {len(features)} features")
-    return geojson
+        # Merge with the location data
+        long_df = pd.merge(long_df, locations, on='point_id', how='left')
+        
+        # Sort by point_id and date
+        long_df.sort_values(['point_id', 'date'], inplace=True)
+        
+        return long_df
+    else:
+        print("No valid epoch data found.")
+        return None
