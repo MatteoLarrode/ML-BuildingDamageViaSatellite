@@ -24,7 +24,7 @@ gaza-damage-detection/
 ├── data/
 │   ├── raw/                # Raw unprocessed data
 │   │   ├── sentinel/       # Raw Sentinel-1 data
-│   │   ├── building_footprints/  # Building footprint data
+│   │   ├── building_data/  # Building footprint (& grid) damage data
 │   │   └── labels/         # Damage labels/training data
 │   ├── processed/          # Processed/cleaned data
 │   │   ├── features/       # Extracted features from time series
@@ -50,9 +50,6 @@ gaza-damage-detection/
 │   ├── download_data.py    # Script to download data
 │   ├── train_model.py      # Script to train models
 │   └── generate_maps.py    # Script to generate final damage maps
-├── tests/                  # Unit tests
-│   ├── test_data.py
-│   └── test_models.py
 ├── results/                # Output results and models
 │   ├── figures/            # Generated figures
 │   ├── maps/               # Generated damage maps

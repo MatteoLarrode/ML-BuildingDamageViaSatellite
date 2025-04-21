@@ -88,40 +88,109 @@ def download_building_data():
     
     return True
 
-def download_unosat_data():
-    """Download UNOSAT damage assessment data for Gaza."""
-    url = "https://unosat.org/static/unosat_filesystem/4047/OCHA-OPT_019_UNOSAT_GazaStrip_CDA_GDB_01December2024.zip"
+unosat_urls = {
+    "07_11_2023": "https://unosat.org/static/unosat_filesystem/3734/UNOSAT_GazaStrip_CDA_07Nov2023_GDB.zip", 
+    "26_11_2023": "https://unosat.org/static/unosat_filesystem/3769/UNOSAT_GazaStrip_CDA_26November2023_GDB.zip", 
+    "06_01_2024": "https://unosat.org/static/unosat_filesystem/3793/UNOSAT_GazaStrip_CDA_January2024_GDB_V2.zip", 
+    "01_04_2024": "https://unosat.org/static/unosat_filesystem/3824/OCHA-OPT_013_UNOSAT_GazaStrip_CDA_01Apr2024_GDB.zip", 
+    "03_05_2024": "https://unosat.org/static/unosat_filesystem/3861/OCHA_OPT-014_UNOSAT_GazaStrip_OPT_CDA_03May2024_GDB_v2.zip", 
+    "06_07_2024": "https://unosat.org/static/unosat_filesystem/3904/OCHA_OPT-015_UNOSAT_GazaStrip_OPT_CDA_06July2024_GDB.zip",
+    "06_09_2024": "https://unosat.org/static/unosat_filesystem/3984/OCHA-OPT-017_UNOSAT_A3_Gaza_Strip_OPT_CDA_GDB_06092024.zip",
+    "01_12_2024": "https://unosat.org/static/unosat_filesystem/4047/OCHA-OPT_019_UNOSAT_GazaStrip_CDA_GDB_01December2024.zip",
+    "25_02_2025": "https://gaza-unosat.docs.cern.ch/CE20231007PSE_UNOSAT_GazaStrip_ComprehensiveDamageAssessment_20250225.zip"
+}
+
+
+def download_unosat_data(date_key=None):
+    """
+    Download UNOSAT damage assessment data for Gaza.
     
-    print("Downloading UNOSAT Gaza damage assessment data...")
+    Args:
+        date_key: Specific date key to download. If None, will download all datasets.
+    
+    Returns:
+        Boolean indicating success or failure
+    """
+    # Dictionary of available UNOSAT datasets with their URLs
+    unosat_urls = {
+        "07_11_2023": "https://unosat.org/static/unosat_filesystem/3734/UNOSAT_GazaStrip_CDA_07Nov2023_GDB.zip", 
+        "26_11_2023": "https://unosat.org/static/unosat_filesystem/3769/UNOSAT_GazaStrip_CDA_26November2023_GDB.zip", 
+        "06_01_2024": "https://unosat.org/static/unosat_filesystem/3793/UNOSAT_GazaStrip_CDA_January2024_GDB_V2.zip", 
+        "01_04_2024": "https://unosat.org/static/unosat_filesystem/3824/OCHA-OPT_013_UNOSAT_GazaStrip_CDA_01Apr2024_GDB.zip", 
+        "03_05_2024": "https://unosat.org/static/unosat_filesystem/3861/OCHA_OPT-014_UNOSAT_GazaStrip_OPT_CDA_03May2024_GDB_v2.zip", 
+        "06_07_2024": "https://unosat.org/static/unosat_filesystem/3904/OCHA_OPT-015_UNOSAT_GazaStrip_OPT_CDA_06July2024_GDB.zip",
+        "06_09_2024": "https://unosat.org/static/unosat_filesystem/3984/OCHA-OPT-017_UNOSAT_A3_Gaza_Strip_OPT_CDA_GDB_06092024.zip",
+        "01_12_2024": "https://unosat.org/static/unosat_filesystem/4047/OCHA-OPT_019_UNOSAT_GazaStrip_CDA_GDB_01December2024.zip",
+        "25_02_2025": "https://gaza-unosat.docs.cern.ch/CE20231007PSE_UNOSAT_GazaStrip_ComprehensiveDamageAssessment_20250225.zip"
+    }
     
     # Get the project root directory
     project_root = Path(__file__).parent.parent.absolute()
     
     # Set the target directory
-    labels_dir = os.path.join(project_root, "data", "raw", "labels")
+    labels_dir = os.path.join(project_root, "data", "raw", "labels", "unosat")
+    os.makedirs(labels_dir, exist_ok=True)
     
-    # Create a temporary directory
-    with tempfile.TemporaryDirectory() as temp_dir:
-        # Download the zip file to the temporary directory
-        zip_path = os.path.join(temp_dir, "unosat_gaza.zip")
-        
-        try:
-            urllib.request.urlretrieve(url, zip_path)
-            print(f"Downloaded zip file to {zip_path}")
-            
-            # Extract zip file contents
-            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                print("Files in the zip archive:")
-                for file in zip_ref.namelist():
-                    print(f" - {file}")
-                
-                # Extract all files
-                print(f"Extracting files to {labels_dir}...")
-                zip_ref.extractall(labels_dir)
-                
-        except Exception as e:
-            print(f"Error downloading or extracting UNOSAT data: {str(e)}")
+    # Determine which datasets to download
+    if date_key is not None:
+        # Download a specific dataset
+        if date_key not in unosat_urls:
+            print(f"Error: Invalid date key '{date_key}'. Available keys: {', '.join(unosat_urls.keys())}")
             return False
+        dates_to_download = {date_key: unosat_urls[date_key]}
+    else:
+        # Download all datasets
+        dates_to_download = unosat_urls
+    
+    success_count = 0
+    fail_count = 0
+    
+    # Download each dataset
+    for date, url in dates_to_download.items():
+        print(f"\nDownloading UNOSAT Gaza damage assessment data for {date}...")
+        
+        # Create a subdirectory for this date
+        date_dir = os.path.join(labels_dir, date)
+        os.makedirs(date_dir, exist_ok=True)
+        
+        # Download the zip file to a temporary directory
+        with tempfile.TemporaryDirectory() as temp_dir:
+            zip_path = os.path.join(temp_dir, f"unosat_gaza_{date}.zip")
+            
+            try:
+                # Download the file
+                urllib.request.urlretrieve(url, zip_path)
+                print(f"Downloaded zip file to {zip_path}")
+                
+                # Extract zip file contents
+                with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                    print(f"Extracting files to {date_dir}...")
+                    zip_ref.extractall(date_dir)
+                
+                # Check for GDB files in the extracted directory
+                gdb_paths = []
+                for root, dirs, files in os.walk(date_dir):
+                    for dir_name in dirs:
+                        if dir_name.endswith('.gdb'):
+                            gdb_path = os.path.join(root, dir_name)
+                            gdb_paths.append(gdb_path)
+                
+                if gdb_paths:
+                    print(f"Found {len(gdb_paths)} GDB file(s) for {date}:")
+                    for gdb_path in gdb_paths:
+                        print(f" - {gdb_path}")
+                    success_count += 1
+                else:
+                    print(f"No GDB files found in the extracted data for {date}.")
+                    fail_count += 1
+                    
+            except Exception as e:
+                print(f"Error downloading or extracting UNOSAT data for {date}: {str(e)}")
+                fail_count += 1
+    
+    # Report summary
+    print(f"\nDownload summary: {success_count} successful, {fail_count} failed")
+    return success_count > 0
 
 if __name__ == "__main__":
     # Get the project root directory
@@ -144,8 +213,43 @@ if __name__ == "__main__":
             print("Building data download or extraction failed.")
     
     if choice == '2' or choice == '3':
-        # Download UNOSAT data
-        success_unosat = download_unosat_data()
+        # For UNOSAT data, ask which dataset to download
+        print("\nUNOSAT damage assessment datasets available:")
+        unosat_urls = {
+            "07_11_2023": "https://unosat.org/static/unosat_filesystem/3734/UNOSAT_GazaStrip_CDA_07Nov2023_GDB.zip", 
+            "26_11_2023": "https://unosat.org/static/unosat_filesystem/3769/UNOSAT_GazaStrip_CDA_26November2023_GDB.zip", 
+            "06_01_2024": "https://unosat.org/static/unosat_filesystem/3793/UNOSAT_GazaStrip_CDA_January2024_GDB_V2.zip", 
+            "01_04_2024": "https://unosat.org/static/unosat_filesystem/3824/OCHA-OPT_013_UNOSAT_GazaStrip_CDA_01Apr2024_GDB.zip", 
+            "03_05_2024": "https://unosat.org/static/unosat_filesystem/3861/OCHA_OPT-014_UNOSAT_GazaStrip_OPT_CDA_03May2024_GDB_v2.zip", 
+            "06_07_2024": "https://unosat.org/static/unosat_filesystem/3904/OCHA_OPT-015_UNOSAT_GazaStrip_OPT_CDA_06July2024_GDB.zip",
+            "06_09_2024": "https://unosat.org/static/unosat_filesystem/3984/OCHA-OPT-017_UNOSAT_A3_Gaza_Strip_OPT_CDA_GDB_06092024.zip",
+            "01_12_2024": "https://unosat.org/static/unosat_filesystem/4047/OCHA-OPT_019_UNOSAT_GazaStrip_CDA_GDB_01December2024.zip",
+            "25_02_2025": "https://gaza-unosat.docs.cern.ch/CE20231007PSE_UNOSAT_GazaStrip_ComprehensiveDamageAssessment_20250225.zip"
+        }
+        
+        print("Available datasets:")
+        for i, date in enumerate(unosat_urls.keys()):
+            print(f"{i+1}. {date}")
+        print(f"{len(unosat_urls)+1}. All datasets")
+        
+        dataset_choice = input(f"Enter your choice (1-{len(unosat_urls)+1}): ")
+        
+        try:
+            dataset_idx = int(dataset_choice) - 1
+            if dataset_idx >= 0 and dataset_idx < len(unosat_urls):
+                # Download a specific dataset
+                date_key = list(unosat_urls.keys())[dataset_idx]
+                success_unosat = download_unosat_data(date_key)
+            elif dataset_idx == len(unosat_urls):
+                # Download all datasets
+                success_unosat = download_unosat_data()
+            else:
+                print("Invalid choice. No UNOSAT data will be downloaded.")
+                success_unosat = False
+        except ValueError:
+            print("Invalid input. No UNOSAT data will be downloaded.")
+            success_unosat = False
+        
         if success_unosat:
             print("UNOSAT data download and extraction completed successfully.")
         else:
