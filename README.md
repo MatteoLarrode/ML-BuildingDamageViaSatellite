@@ -72,16 +72,18 @@ gaza-damage-detection/
 ### Installation
 1. Clone this repository:
 
-`git clone https://github.com/MatteoLarrode/ML-BuildingDamageViaSatellite?tab=readme-ov-file`
-
-`cd ML-BuildingDamageViaSatellite`
+```
+git clone https://github.com/MatteoLarrode/ML-BuildingDamageViaSatellite?tab=readme-ov-file
+cd ML-BuildingDamageViaSatellite
+```
 
 
 2. Create and activate a conda environment:
 
-`conda env create -f environment.yml`
-
-`conda activate ML-summative`
+```
+conda env create -f environment.yml
+conda activate ML-summative
+```
 
 
 
