@@ -115,7 +115,7 @@ def download_unosat_data(most_recent_only=True):
     project_root = Path(__file__).parent.parent.absolute()
     
     # Set the target directory
-    labels_dir = os.path.join(project_root, "data", "raw", "labels", "unosat")
+    labels_dir = os.path.join(project_root, "data", "raw", "labels")
     os.makedirs(labels_dir, exist_ok=True)
     
     # If most_recent_only is True, only use the most recent dataset
