@@ -19,6 +19,7 @@ This project aims to develop a scalable method for estimating building damage in
 
 ## Project Structure
 
+```
 gaza-damage-detection/
 ├── data/
 │   ├── raw/                # Raw unprocessed data
@@ -60,6 +61,7 @@ gaza-damage-detection/
 ├── setup.py                # For packaging the project
 ├── README.md               # This file
 └── LICENSE                 # Project license
+```
 
 ## Getting Started
 
