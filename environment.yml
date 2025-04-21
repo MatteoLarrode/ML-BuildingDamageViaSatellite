@@ -1,0 +1,17 @@
+name: ML-summative
+channels:
+  - https://repo.anaconda.com/pkgs/main
+  - https://repo.anaconda.com/pkgs/r
+dependencies:
+  - python=3.10
+  - scikit-image
+  - scikit-learn
+  - matplotlib
+  - numpy
+  - pandas
+  - ipykernel
+  - jupyter
+  - geopandas
+  - seaborn
+  - tqdm
+prefix: /opt/anaconda3/envs/ML-summative
