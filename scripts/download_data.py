@@ -88,26 +88,13 @@ def download_building_data():
     
     return True
 
-unosat_urls = {
-    "07_11_2023": "https://unosat.org/static/unosat_filesystem/3734/UNOSAT_GazaStrip_CDA_07Nov2023_GDB.zip", 
-    "26_11_2023": "https://unosat.org/static/unosat_filesystem/3769/UNOSAT_GazaStrip_CDA_26November2023_GDB.zip", 
-    "06_01_2024": "https://unosat.org/static/unosat_filesystem/3793/UNOSAT_GazaStrip_CDA_January2024_GDB_V2.zip", 
-    "01_04_2024": "https://unosat.org/static/unosat_filesystem/3824/OCHA-OPT_013_UNOSAT_GazaStrip_CDA_01Apr2024_GDB.zip", 
-    "03_05_2024": "https://unosat.org/static/unosat_filesystem/3861/OCHA_OPT-014_UNOSAT_GazaStrip_OPT_CDA_03May2024_GDB_v2.zip", 
-    "06_07_2024": "https://unosat.org/static/unosat_filesystem/3904/OCHA_OPT-015_UNOSAT_GazaStrip_OPT_CDA_06July2024_GDB.zip",
-    "06_09_2024": "https://unosat.org/static/unosat_filesystem/3984/OCHA-OPT-017_UNOSAT_A3_Gaza_Strip_OPT_CDA_GDB_06092024.zip",
-    "01_12_2024": "https://unosat.org/static/unosat_filesystem/4047/OCHA-OPT_019_UNOSAT_GazaStrip_CDA_GDB_01December2024.zip",
-    "25_02_2025": "https://gaza-unosat.docs.cern.ch/CE20231007PSE_UNOSAT_GazaStrip_ComprehensiveDamageAssessment_20250225.zip"
-}
-
-
-def download_unosat_data(date_key=None):
+def download_unosat_data(most_recent_only=True):
     """
     Download UNOSAT damage assessment data for Gaza.
     
     Args:
-        date_key: Specific date key to download. If None, will download all datasets.
-    
+        most_recent_only: If True, only download the most recent dataset.
+        
     Returns:
         Boolean indicating success or failure
     """
@@ -131,13 +118,12 @@ def download_unosat_data(date_key=None):
     labels_dir = os.path.join(project_root, "data", "raw", "labels", "unosat")
     os.makedirs(labels_dir, exist_ok=True)
     
-    # Determine which datasets to download
-    if date_key is not None:
-        # Download a specific dataset
-        if date_key not in unosat_urls:
-            print(f"Error: Invalid date key '{date_key}'. Available keys: {', '.join(unosat_urls.keys())}")
-            return False
-        dates_to_download = {date_key: unosat_urls[date_key]}
+    # If most_recent_only is True, only use the most recent dataset
+    if most_recent_only:
+        # Find the most recent date
+        most_recent_date = "25_02_2025"  # This is the most recent date in the dictionary
+        dates_to_download = {most_recent_date: unosat_urls[most_recent_date]}
+        print(f"Only downloading most recent dataset: {most_recent_date}")
     else:
         # Download all datasets
         dates_to_download = unosat_urls
@@ -199,12 +185,14 @@ if __name__ == "__main__":
     # Ask user which data to download
     print("What data would you like to download?")
     print("1. Building footprints data")
-    print("2. UNOSAT damage assessment data")
-    print("3. Both")
+    print("2. UNOSAT damage assessment data (most recent only)")
+    print("3. All UNOSAT damage assessment data")
+    print("4. Building footprints and most recent UNOSAT data")
+    print("5. Building footprints and all UNOSAT data")
     
-    choice = input("Enter your choice (1-3): ")
+    choice = input("Enter your choice (1-5): ")
     
-    if choice == '1' or choice == '3':
+    if choice == '1' or choice == '4' or choice == '5':
         # Download building data
         success_building = download_building_data()
         if success_building:
@@ -212,44 +200,17 @@ if __name__ == "__main__":
         else:
             print("Building data download or extraction failed.")
     
-    if choice == '2' or choice == '3':
-        # For UNOSAT data, ask which dataset to download
-        print("\nUNOSAT damage assessment datasets available:")
-        unosat_urls = {
-            "07_11_2023": "https://unosat.org/static/unosat_filesystem/3734/UNOSAT_GazaStrip_CDA_07Nov2023_GDB.zip", 
-            "26_11_2023": "https://unosat.org/static/unosat_filesystem/3769/UNOSAT_GazaStrip_CDA_26November2023_GDB.zip", 
-            "06_01_2024": "https://unosat.org/static/unosat_filesystem/3793/UNOSAT_GazaStrip_CDA_January2024_GDB_V2.zip", 
-            "01_04_2024": "https://unosat.org/static/unosat_filesystem/3824/OCHA-OPT_013_UNOSAT_GazaStrip_CDA_01Apr2024_GDB.zip", 
-            "03_05_2024": "https://unosat.org/static/unosat_filesystem/3861/OCHA_OPT-014_UNOSAT_GazaStrip_OPT_CDA_03May2024_GDB_v2.zip", 
-            "06_07_2024": "https://unosat.org/static/unosat_filesystem/3904/OCHA_OPT-015_UNOSAT_GazaStrip_OPT_CDA_06July2024_GDB.zip",
-            "06_09_2024": "https://unosat.org/static/unosat_filesystem/3984/OCHA-OPT-017_UNOSAT_A3_Gaza_Strip_OPT_CDA_GDB_06092024.zip",
-            "01_12_2024": "https://unosat.org/static/unosat_filesystem/4047/OCHA-OPT_019_UNOSAT_GazaStrip_CDA_GDB_01December2024.zip",
-            "25_02_2025": "https://gaza-unosat.docs.cern.ch/CE20231007PSE_UNOSAT_GazaStrip_ComprehensiveDamageAssessment_20250225.zip"
-        }
-        
-        print("Available datasets:")
-        for i, date in enumerate(unosat_urls.keys()):
-            print(f"{i+1}. {date}")
-        print(f"{len(unosat_urls)+1}. All datasets")
-        
-        dataset_choice = input(f"Enter your choice (1-{len(unosat_urls)+1}): ")
-        
-        try:
-            dataset_idx = int(dataset_choice) - 1
-            if dataset_idx >= 0 and dataset_idx < len(unosat_urls):
-                # Download a specific dataset
-                date_key = list(unosat_urls.keys())[dataset_idx]
-                success_unosat = download_unosat_data(date_key)
-            elif dataset_idx == len(unosat_urls):
-                # Download all datasets
-                success_unosat = download_unosat_data()
-            else:
-                print("Invalid choice. No UNOSAT data will be downloaded.")
-                success_unosat = False
-        except ValueError:
-            print("Invalid input. No UNOSAT data will be downloaded.")
-            success_unosat = False
-        
+    if choice == '2' or choice == '4':
+        # Download most recent UNOSAT data only
+        success_unosat = download_unosat_data(most_recent_only=True)
+        if success_unosat:
+            print("UNOSAT data download and extraction completed successfully.")
+        else:
+            print("UNOSAT data download or extraction failed.")
+    
+    if choice == '3' or choice == '5':
+        # Download all UNOSAT data
+        success_unosat = download_unosat_data(most_recent_only=False)
         if success_unosat:
             print("UNOSAT data download and extraction completed successfully.")
         else:
