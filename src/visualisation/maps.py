@@ -78,7 +78,7 @@ def parse_geo_column(df):
         print(f"Error converting to GeoDataFrame: {e}")
         return None
 
-def create_folium_map(gdf, color_column=None, color_scheme='YlOrRd', title="Building Map"):
+def create_folium_map(gdf, color_column=None, color_scheme='YlOrRd', title="Building Map", use_class_for_damage=False):
     """
     Create a Folium map to visualize the GeoDataFrame.
     
@@ -87,6 +87,8 @@ def create_folium_map(gdf, color_column=None, color_scheme='YlOrRd', title="Buil
         color_column: Column to use for coloring features (optional)
         color_scheme: Colormap to use for coloring (optional)
         title: Title for the map (optional)
+        use_class_for_damage: If True, use the 'class' column to color buildings
+                             (1=damaged, 0=undamaged) instead of color_column
         
     Returns:
         Folium Map object
@@ -117,7 +119,54 @@ def create_folium_map(gdf, color_column=None, color_scheme='YlOrRd', title="Buil
     m.get_root().html.add_child(folium.Element(title_html))
     
     if gdf is not None and len(gdf) > 0:
-        if color_column and color_column in gdf.columns:
+        if use_class_for_damage and 'class' in gdf.columns:
+            # Use the 'class' column for damage visualization (1=damaged, 0=undamaged)
+            feature_group = folium.FeatureGroup(name="Buildings (by damage class)")
+            
+            for idx, row in gdf.iterrows():
+                if hasattr(row.geometry, 'geom_type'):
+                    # Determine color based on class value
+                    is_damaged = row['class'] == 1
+                    color = 'red' if is_damaged else 'green'
+                    
+                    if row.geometry.geom_type == 'Point':
+                        folium.CircleMarker(
+                            location=[row.geometry.y, row.geometry.x],
+                            radius=5,
+                            color=color,
+                            fill=True,
+                            fill_color=color,
+                            fill_opacity=0.6,
+                            tooltip=f"ID: {row['system:index']}, Damaged: {'Yes' if is_damaged else 'No'}"
+                        ).add_to(feature_group)
+                    elif row.geometry.geom_type in ['Polygon', 'MultiPolygon']:
+                        folium.GeoJson(
+                            row.geometry,
+                            style_function=lambda x, color=color: {
+                                'fillColor': color,
+                                'color': color,
+                                'weight': 1,
+                                'fillOpacity': 0.6
+                            },
+                            tooltip=f"ID: {row['system:index']}, Damaged: {'Yes' if is_damaged else 'No'}"
+                        ).add_to(feature_group)
+            
+            feature_group.add_to(m)
+            
+            # Add a simple legend
+            legend_html = """
+            <div style="position: fixed; 
+                        bottom: 50px; right: 50px; width: 150px; height: 90px; 
+                        border:2px solid grey; z-index:9999; font-size:14px;
+                        background-color:white;
+                        padding: 10px">
+              <span style="color:green;">■</span> Undamaged<br>
+              <span style="color:red;">■</span> Damaged
+            </div>
+            """
+            m.get_root().html.add_child(folium.Element(legend_html))
+            
+        elif color_column and color_column in gdf.columns:
             # Create choropleth map if color column is provided
             folium.Choropleth(
                 geo_data=gdf,
