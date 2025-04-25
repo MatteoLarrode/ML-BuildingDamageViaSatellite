@@ -37,8 +37,8 @@ def download_sentinel_data(url, output_dir):
     # Run download script
     start_time = datetime.now()
     
-    # Download using subprocess - updated to use the fixed script
-    cmd = ["python", "../scripts/fixed_download_script.py", url, 
+    # Download using subprocess
+    cmd = ["python", "../scripts/download_process_single_sentinel_file.py", url, 
            "--output_dir", output_dir]
     
     result = subprocess.run(cmd)

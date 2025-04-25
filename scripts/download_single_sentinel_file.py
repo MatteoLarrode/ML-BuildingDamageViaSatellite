@@ -3,10 +3,10 @@
 Script to download a single Sentinel-1 file from ASF.
 
 Usage:
-    python download_sentinel_file.py <url> [--output_dir DIR]
+    python download_single_sentinel_file.py <url> [--output_dir DIR]
 
 Example:
-    python download_sentinel_file.py https://datapool.asf.alaska.edu/GRD_HD/SA/S1A_IW_GRDH_1SDV_20230427T154057_20230427T154122_048284_05CE71_87D9.zip --output_dir ../data/raw/sentinel
+    python download_single_sentinel_file.py https://datapool.asf.alaska.edu/GRD_HD/SA/S1A_IW_GRDH_1SDV_20230427T154057_20230427T154122_048284_05CE71_87D9.zip --output_dir ../data/raw/sentinel
 """
 
 import os
