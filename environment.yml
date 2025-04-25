@@ -7,6 +7,7 @@ dependencies:
   - scikit-image
   - scikit-learn
   - matplotlib
+  - rasterio
   - numpy
   - pandas
   - ipykernel
@@ -15,4 +16,6 @@ dependencies:
   - seaborn
   - tqdm
   - fiona
+  - pip:
+    - asf-search
 prefix: /opt/anaconda3/envs/ML-summative
