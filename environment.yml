@@ -18,4 +18,5 @@ dependencies:
   - fiona
   - pip:
     - asf-search
-prefix: /opt/anaconda3/envs/ML-summative
+    - snappy
+prefix: /opt/an
