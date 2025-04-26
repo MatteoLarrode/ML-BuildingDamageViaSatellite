@@ -207,7 +207,7 @@ def collect_all_backscatter_values_optimized(data_dir, aoi_path=None, polarizati
                 'backscatter': backscatter_values,
                 'date_str': date_str,
                 # Date format to YYYYMMDD
-                'date': pd.to_datetime(date_str, format='%Y%m%d'),
+                'backscatter_date': pd.to_datetime(date_str, format='%Y%m%d'),
                 'polarization': polarization,
                 'orbit': orbit,
                 'period': period,
@@ -338,25 +338,21 @@ def extract_pixel_timeseries(labeled_points, backscatter_data, buffer_distance=5
                 record = {
                     'point_id': idx,
                     'pixel_id': pixel_id,
-                    'date': row['date'],
+                    'date': row['backscatter_date'],
                     'polarization': row['polarization'],
                     'orbit': row['orbit'],
                     'period': row['period'],
                     'backscatter': row['backscatter'],
-                    'point_lon': point.geometry.x,
-                    'point_lat': point.geometry.y,
-                    'pixel_lon': row.geometry.x,
-                    'pixel_lat': row.geometry.y,
+                    'point_lon': point.geometry.x if hasattr(point.geometry, 'x') else point.geometry.centroid.x,
+                    'point_lat': point.geometry.y if hasattr(point.geometry, 'y') else point.geometry.centroid.y,
+                    'pixel_lon': row['lon'],
+                    'pixel_lat': row['lat'],
                     **label_info
                 }
                 timeseries_records.append(record)
     
     # Convert to DataFrame
     timeseries_df = pd.DataFrame(timeseries_records)
-    
-    # Convert date to datetime
-    if 'date' in timeseries_df.columns:
-        timeseries_df['date'] = pd.to_datetime(timeseries_df['date'], format='%Y%m%d')
     
     print(f"Extracted {len(timeseries_df)} time series points for {timeseries_df['point_id'].nunique()} labeled points")
     print(f"Covering {timeseries_df['pixel_id'].nunique()} unique pixels")
@@ -377,10 +373,6 @@ def create_timeseries_features(timeseries_df, reference_dates=None, assessment_d
     -----------
     timeseries_df : DataFrame
         Time series data from extract_pixel_timeseries function
-    reference_dates : list, optional
-        List of dates to use as reference period (pre-conflict)
-    assessment_dates : list, optional
-        List of dates to use as assessment period (post-conflict)
         
     Returns:
     --------
@@ -391,29 +383,9 @@ def create_timeseries_features(timeseries_df, reference_dates=None, assessment_d
     # Make a copy to avoid modifying the original
     df = timeseries_df.copy()
     
-    # If dates not provided, infer them
-    if reference_dates is None or assessment_dates is None:
-        all_dates = pd.to_datetime(df['date'].unique()).sort_values()
-        conflict_start = pd.to_datetime('2023-10-07')
-        
-        if reference_dates is None:
-            reference_dates = [d for d in all_dates if d < conflict_start]
-            print(f"Inferred reference dates: {reference_dates}")
-        
-        if assessment_dates is None:
-            assessment_dates = [d for d in all_dates if d >= conflict_start]
-            print(f"Inferred assessment dates: {assessment_dates}")
-    
-    # Convert reference_dates and assessment_dates to datetime if they're not already
-    if reference_dates is not None and not isinstance(reference_dates[0], pd.Timestamp):
-        reference_dates = pd.to_datetime(reference_dates)
-    
-    if assessment_dates is not None and not isinstance(assessment_dates[0], pd.Timestamp):
-        assessment_dates = pd.to_datetime(assessment_dates)
-    
     # Split data into reference and assessment periods
-    ref_data = df[df['date'].isin(reference_dates)] if reference_dates is not None else df[df['period'] == 'reference']
-    assess_data = df[df['date'].isin(assessment_dates)] if assessment_dates is not None else df[df['period'] == 'post']
+    ref_data = df[df['period'] == 'reference']
+    assess_data = df[df['period'] == 'post']
     
     print(f"Reference period: {len(ref_data)} observations")
     print(f"Assessment period: {len(assess_data)} observations")
@@ -442,8 +414,8 @@ def create_timeseries_features(timeseries_df, reference_dates=None, assessment_d
                             total=df.groupby(group_cols).ngroups):
         
         # Get reference and assessment data for this group
-        group_ref = group[group['date'].isin(reference_dates)] if reference_dates is not None else group[group['period'] == 'reference']
-        group_assess = group[group['date'].isin(assessment_dates)] if assessment_dates is not None else group[group['period'] == 'post']
+        group_ref = group[group['period'] == 'reference']
+        group_assess = group[group['period'] == 'post']
         
         # Skip if we don't have data for both periods
         if len(group_ref) == 0 or len(group_assess) == 0:
