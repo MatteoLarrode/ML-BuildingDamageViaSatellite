@@ -4,13 +4,17 @@ import fiona
 import geopandas as gpd
 import os
 import pandas as pd
-
+import numpy as np
+import os
+import matplotlib.pyplot as plt
+import folium
+from folium.plugins import HeatMap, MarkerCluster
+from datetime import datetime
 
 # ---- Setup ----
 def get_project_root():
     """Get the project root directory."""
-    # This assumes the script is in src/data/
-    return Path(__file__).parent.parent.parent
+    return Path(__file__).parent.parent.absolute()
 
 # ---- Exploration funtions ----
 def find_unosat_gdb():
@@ -70,70 +74,65 @@ def load_unosat_layer(gdb_path, layer_name):
         print(f"Error loading layer from GDB: {str(e)}")
         return None
 
-def load_all_unosat_damage_sites():
+def load_unosat_damage_sites():
     """
-    Load damage sites layers from all available UNOSAT GDBs.
+    Load damage sites layer from the UNOSAT GDB.
     
     Returns:
-        Dictionary with date keys and GeoDataFrames as values, containing damage data
+        GeoDataFrame containing damage data
     """
-    # Find all UNOSAT GDB directories
+    # Path to the UNOSAT GDB
     project_root = get_project_root()
-    labels_dir = os.path.join(project_root, "data", "raw", "labels", "unosat")
+    gdb_path = os.path.join(project_root, "data", "raw", "labels", "UNOSAT_GazaStrip_CDA_25February2025.gdb")
     
-    # Check if the directory exists
-    if not os.path.exists(labels_dir):
-        print(f"UNOSAT data directory not found: {labels_dir}")
-        return {}
+    print(f"Loading UNOSAT data from: {gdb_path}")
     
-    # Find all date subdirectories
-    date_gdbs = {}
-    for date_dir in os.listdir(labels_dir):
-        full_path = os.path.join(labels_dir, date_dir)
-        if os.path.isdir(full_path):
-            # Find GDB files in this directory
-            for root, dirs, files in os.walk(full_path):
-                for dir_name in dirs:
-                    if dir_name.endswith('.gdb'):
-                        gdb_path = os.path.join(root, dir_name)
-                        date_gdbs[date_dir] = gdb_path
-                        break
+    # Check if the file exists
+    if not os.path.exists(gdb_path):
+        print(f"UNOSAT data file not found: {gdb_path}")
+        return None
     
-    if not date_gdbs:
-        print("No UNOSAT GDB files found.")
-        return {}
+    # List the layers in the GDB
+    layers = list_gdb_layers(gdb_path)
     
-    print(f"Found {len(date_gdbs)} UNOSAT GDB datasets:")
-    for date, gdb_path in sorted(date_gdbs.items()):
-        print(f" - {date}: {gdb_path}")
+    # Find the damage sites layer - it should be the first layer as per your example
+    damage_layer = None
+    for layer in layers:
+        if 'Damage' in layer or 'damage' in layer:
+            damage_layer = layer
+            break
     
-    # Load damage sites from each GDB
-    damage_data = {}
-    for date, gdb_path in sorted(date_gdbs.items()):
-        # List layers in the GDB
-        layers = list_gdb_layers(gdb_path)
+    if not damage_layer and len(layers) > 0:
+        damage_layer = layers[0]  # Use the first layer if no "damage" layer found
         
-        # Find the damage sites layer
-        damage_layer = None
-        for layer in layers:
-            if 'damage' in layer.lower() and ('sites' in layer.lower() or 'building' in layer.lower()):
-                damage_layer = layer
-                break
-        
-        if damage_layer:
-            try:
-                # Load the layer
-                gdf = load_unosat_layer(gdb_path, damage_layer)
-                if gdf is not None and len(gdf) > 0:
-                    damage_data[date] = {
-                        'gdf': gdf,
-                        'layer_name': damage_layer
-                    }
-                    print(f"Loaded {len(gdf)} damage points from {date} ({damage_layer})")
-            except Exception as e:
-                print(f"Error loading damage layer from {date}: {str(e)}")
-    
-    return damage_data
+    if damage_layer:
+        try:
+            # Load the layer
+            print(f"Loading layer: {damage_layer}")
+            gdf = load_unosat_layer(gdb_path, damage_layer)
+            
+            if gdf is not None and len(gdf) > 0:
+                print(f"Successfully loaded {len(gdf)} damage points")
+                
+                # Print column information to help with debugging
+                print("\nColumns in the damage data:")
+                for col in gdf.columns:
+                    print(f" - {col}")
+                
+                # Check for damage classification columns
+                damage_cols = [col for col in gdf.columns if 'Damage' in col or 'damage' in col]
+                print(f"\nFound {len(damage_cols)} damage-related columns")
+                
+                return gdf
+            else:
+                print("Failed to load damage data")
+                return None
+        except Exception as e:
+            print(f"Error loading damage layer: {str(e)}")
+            return None
+    else:
+        print(f"No damage layer found in the GDB. Available layers: {', '.join(layers)}")
+        return None
 
 def inspect_layer_properties(gdb_path, layer_name):
     """
@@ -197,16 +196,17 @@ def inspect_layer_properties(gdb_path, layer_name):
     return gdf
 
 # ----- Preprocessing functions -----
+import os
 import geopandas as gpd
 import pandas as pd
 import numpy as np
-import os
 import matplotlib.pyplot as plt
 import folium
 from folium.plugins import HeatMap, MarkerCluster
 from datetime import datetime
 
-def process_unosat_damage_labels(gdf, date_index=7, aoi_path=None, output_dir="../data/processed/labels"):
+def process_unosat_damage_labels(gdf, date_index=7, aoi_path=None, output_dir="../data/processed/labels", 
+                                positive_classes=[1, 2], include_moderate=False):
     """
     Process UNOSAT damage labels focusing on a specific date index.
     
@@ -220,6 +220,12 @@ def process_unosat_damage_labels(gdf, date_index=7, aoi_path=None, output_dir=".
         Path to AOI GeoJSON file to filter labels spatially
     output_dir : str, default="../data/processed/labels"
         Directory to save processed labels
+    positive_classes : list, default=[1, 2]
+        Damage classes to be considered as positive (damaged) examples
+        In UNOSAT: 1=Destroyed, 2=Severe Damage, 3=Moderate Damage, 
+        4=Possible Damage, 6=No Visible Damage, 11=Possible Damage from adjacent impact
+    include_moderate : bool, default=False
+        Whether to include moderate damage in the dataset (will be labeled as 0 for binary classification)
         
     Returns:
     --------
@@ -227,6 +233,10 @@ def process_unosat_damage_labels(gdf, date_index=7, aoi_path=None, output_dir=".
         Processed and cleaned damage labels
     """
     print(f"Processing UNOSAT damage labels for date index {date_index}...")
+    
+    if gdf is None:
+        print("Error: No damage data provided")
+        return None
     
     # Create a copy to avoid modifying the original
     damage_labels = gdf.copy()
@@ -239,6 +249,12 @@ def process_unosat_damage_labels(gdf, date_index=7, aoi_path=None, output_dir=".
     damage_class_col = f"Main_Damage_Site_Class_{date_index}"
     damage_status_col = f"Damage_Status_{date_index}"
     
+    # Check if the columns exist
+    if damage_class_col not in damage_labels.columns:
+        print(f"Error: Column '{damage_class_col}' not found in the data")
+        print(f"Available columns: {damage_labels.columns.tolist()}")
+        return None
+    
     # Filter to rows that have data for this date index
     valid_mask = ~damage_labels[damage_class_col].isna()
     valid_labels = damage_labels[valid_mask].copy()
@@ -246,50 +262,86 @@ def process_unosat_damage_labels(gdf, date_index=7, aoi_path=None, output_dir=".
     print(f"Found {len(valid_labels)} valid damage labels for date index {date_index}")
     
     # Get the actual date from the data
-    unique_dates = valid_labels[date_col].unique()
-    date_str = pd.to_datetime(unique_dates[0]).strftime('%Y%m%d') if len(unique_dates) > 0 else f"date_{date_index}"
-    print(f"Date: {unique_dates[0] if len(unique_dates) > 0 else 'Unknown'}")
+    if date_col in valid_labels.columns:
+        unique_dates = valid_labels[date_col].dropna().unique()
+        date_str = pd.to_datetime(unique_dates[0]).strftime('%Y%m%d') if len(unique_dates) > 0 else f"date_{date_index}"
+        print(f"Date: {unique_dates[0] if len(unique_dates) > 0 else 'Unknown'}")
+    else:
+        print(f"Warning: Date column '{date_col}' not found")
+        date_str = f"date_{date_index}"
     
-    # Create a simplified and cleaned version
-    cleaned_labels = valid_labels[['SiteID', date_col, damage_class_col, 
-                                damage_status_col, 'Governorate', 'Municipality', 
-                                'Neighborhood', 'geometry']].copy()
+    # Create a simplified and cleaned version with available columns
+    columns_to_keep = ['SiteID', 'geometry']
+    
+    # Add date column if it exists
+    if date_col in valid_labels.columns:
+        columns_to_keep.append(date_col)
+    
+    # Add damage class column
+    columns_to_keep.append(damage_class_col)
+    
+    # Add damage status column if it exists
+    if damage_status_col in valid_labels.columns:
+        columns_to_keep.append(damage_status_col)
+    
+    # Add location columns if they exist
+    for col in ['Governorate', 'Municipality', 'Neighborhood']:
+        if col in valid_labels.columns:
+            columns_to_keep.append(col)
+    
+    # Create cleaned dataset with available columns
+    cleaned_labels = valid_labels[columns_to_keep].copy()
     
     # Rename columns for clarity
-    cleaned_labels = cleaned_labels.rename(columns={
-        date_col: 'date',
-        damage_class_col: 'damage_class',
-        damage_status_col: 'damage_status'
-    })
+    column_mapping = {}
+    if date_col in cleaned_labels.columns:
+        column_mapping[date_col] = 'date'
+    column_mapping[damage_class_col] = 'damage_class'
+    if damage_status_col in cleaned_labels.columns:
+        column_mapping[damage_status_col] = 'damage_status'
+    
+    cleaned_labels = cleaned_labels.rename(columns=column_mapping)
     
     # Convert damage class codes to descriptive categories
-    # Based on UNOSAT classification:
-    # 1 = No Damage, 2 = Minor/Moderate Damage, 3 = Severe Damage, 4 = Destroyed
+    # Based on UNOSAT classification from the provided image
     damage_class_map = {
-        1: 'No Damage',
-        2: 'Minor/Moderate Damage',
-        3: 'Severe Damage',
-        4: 'Destroyed',
-        6: 'Possible Damage',
-        11: 'Under Construction'
+        1: 'Destroyed',
+        2: 'Severe Damage',
+        3: 'Moderate Damage',
+        4: 'Possible Damage',
+        6: 'No Visible Damage',
+        11: 'Possible Damage from adjacent impact/debris'
     }
     
     # Apply mapping
     cleaned_labels['damage_class_desc'] = cleaned_labels['damage_class'].map(damage_class_map)
     
+    # Filter to keep only desired classes
+    if not include_moderate:
+        # Only keep destroyed, severe damage, and no damage
+        class_filter = cleaned_labels['damage_class'].isin(positive_classes + [6])  # 6 = No Visible Damage
+        filtered_labels = cleaned_labels[class_filter].copy()
+        print(f"Filtered from {len(cleaned_labels)} to {len(filtered_labels)} points " +
+              f"(keeping only Destroyed, Severe Damage, and No Visible Damage)")
+        cleaned_labels = filtered_labels
+    else:
+        # Keep all classes but still mark the binary label properly
+        print("Keeping all damage classes in the dataset")
+    
     # Create binary damage indicator (1 = damaged, 0 = not damaged)
+    # Only Destroyed (1) and Severe Damage (2) are considered as damaged
     cleaned_labels['is_damaged'] = cleaned_labels['damage_class'].apply(
-        lambda x: 0 if x == 1 else 1  # 1 = No Damage
+        lambda x: 1 if x in positive_classes else 0
     )
     
-    # Create categorical damage level (0 = none, 1 = minor/moderate, 2 = severe, 3 = destroyed)
+    # Create categorical damage level (0 = none, 1 = moderate, 2 = severe, 3 = destroyed)
     damage_level_map = {
-        1: 0,  # No Damage -> 0
-        2: 1,  # Minor/Moderate -> 1 
-        3: 2,  # Severe -> 2
-        4: 3,  # Destroyed -> 3
-        6: np.nan,  # Possible Damage -> NaN
-        11: np.nan  # Under Construction -> NaN
+        1: 3,  # Destroyed -> 3
+        2: 2,  # Severe Damage -> 2
+        3: 1,  # Moderate Damage -> 1
+        4: 0,  # Possible Damage -> 0
+        6: 0,  # No Visible Damage -> 0
+        11: 0  # Possible Damage from adjacent impact -> 0
     }
     
     cleaned_labels['damage_level'] = cleaned_labels['damage_class'].map(damage_level_map)
@@ -336,6 +388,103 @@ def process_unosat_damage_labels(gdf, date_index=7, aoi_path=None, output_dir=".
     print(f"Total undamaged structures: {len(cleaned_labels) - damaged_count} ({(len(cleaned_labels) - damaged_count)/len(cleaned_labels)*100:.1f}%)")
     
     return cleaned_labels
+
+def create_control_points(damage_labels, aoi_path, min_distance=100, num_points=None):
+    """
+    Generate control points away from damaged areas to serve as negative examples
+    
+    Parameters:
+    -----------
+    damage_labels : GeoDataFrame
+        GeoDataFrame with damage labels
+    aoi_path : str
+        Path to AOI GeoJSON file
+    min_distance : float, default=100
+        Minimum distance (meters) from any damage point
+    num_points : int, optional
+        Number of control points to generate (default: same as damage points)
+        
+    Returns:
+    --------
+    GeoDataFrame
+        Control points with the same structure as damage_labels
+    """
+    import geopandas as gpd
+    from shapely.geometry import Point
+    import random
+    
+    # Set number of points to match damage points if not specified
+    if num_points is None:
+        num_points = len(damage_labels)
+    
+    print(f"Generating {num_points} control points at least {min_distance}m from damage...")
+    
+    # Load AOI
+    aoi = gpd.read_file(aoi_path)
+    
+    # Make sure CRS matches
+    if aoi.crs != damage_labels.crs:
+        aoi = aoi.to_crs(damage_labels.crs)
+    
+    # Get AOI boundary as a single geometry
+    aoi_boundary = aoi.unary_union
+    
+    # Create a buffer around all damage points
+    print("Creating damage buffer zone...")
+    # Convert to UTM for accurate distance measurement
+    if damage_labels.crs.is_geographic:
+        damage_utm = damage_labels.to_crs("EPSG:32636")  # UTM zone 36N for Gaza
+        damage_buffer = gpd.GeoDataFrame(geometry=damage_utm.geometry.buffer(min_distance))
+    else:
+        damage_buffer = gpd.GeoDataFrame(geometry=damage_labels.geometry.buffer(min_distance))
+    
+    damage_buffer = damage_buffer.unary_union
+    
+    # Convert back to original CRS if needed
+    if damage_labels.crs.is_geographic:
+        # Convert the unary_union back to a GeoDataFrame with the original CRS
+        damage_buffer_gdf = gpd.GeoDataFrame(geometry=[damage_buffer], crs="EPSG:32636")
+        damage_buffer = damage_buffer_gdf.to_crs(damage_labels.crs).geometry[0]
+    
+    # Generate random points within the AOI but outside damage zones
+    control_points = []
+    num_attempts = 0
+    
+    print("Generating random points...")
+    while len(control_points) < num_points and num_attempts < 50000:
+        num_attempts += 1
+        
+        if num_attempts % 5000 == 0:
+            print(f"  Made {num_attempts} attempts, found {len(control_points)} valid points...")
+        
+        # Get AOI bounds
+        minx, miny, maxx, maxy = aoi_boundary.bounds
+        
+        # Generate random point within bounds
+        x = random.uniform(minx, maxx)
+        y = random.uniform(miny, maxy)
+        point = Point(x, y)
+        
+        # Check if point is within AOI boundary but outside damage buffer
+        if point.within(aoi_boundary) and not point.within(damage_buffer):
+            control_points.append(point)
+    
+    print(f"Found {len(control_points)} valid control points after {num_attempts} attempts")
+    
+    # Create GeoDataFrame of control points
+    control_gdf = gpd.GeoDataFrame(
+        {'geometry': control_points},
+        crs=damage_labels.crs
+    )
+    
+    # Add columns for consistency
+    control_gdf['is_damaged'] = 0
+    control_gdf['damage_class'] = 6  # "No Visible Damage"
+    control_gdf['damage_class_desc'] = 'No Visible Damage'
+    control_gdf['lon'] = control_gdf.geometry.x
+    control_gdf['lat'] = control_gdf.geometry.y
+    
+    return control_gdf
 
 def visualize_damage_labels(damage_labels, output_dir="../data/processed/labels"):
     """

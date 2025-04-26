@@ -119,6 +119,120 @@ def extract_backscatter_from_tiff(tiff_path, polarization=None, aoi_path=None):
     
     return gdf
 
+def extract_ml_features(points_gdf, backscatter_gdf, buffer_distance=10):
+    """
+    Extract machine learning features from backscatter data for given points
+    
+    Parameters:
+    -----------
+    points_gdf : GeoDataFrame
+        Points to extract features for (both damaged and control)
+    backscatter_gdf : GeoDataFrame
+        Backscatter values
+    buffer_distance : float, default=10
+        Buffer distance (meters) around points
+        
+    Returns:
+    --------
+    DataFrame
+        Features for machine learning
+    """
+    # Create buffers around points
+    if points_gdf.crs.is_geographic:
+        points_utm = points_gdf.to_crs("EPSG:32636")  # UTM zone 36N
+        buffered = points_utm.copy()
+        buffered['geometry'] = points_utm.geometry.buffer(buffer_distance)
+        buffered = buffered.to_crs(points_gdf.crs)
+    else:
+        buffered = points_gdf.copy()
+        buffered['geometry'] = buffered.geometry.buffer(buffer_distance)
+    
+    # Extract features for each point
+    all_features = []
+    
+    for idx, row in buffered.iterrows():
+        point_buffer = row.geometry
+        
+        # Find backscatter points within this buffer
+        matching_points = backscatter_gdf[backscatter_gdf.geometry.within(point_buffer)]
+        
+        if len(matching_points) == 0:
+            continue
+        
+        # Split into reference and post periods
+        ref_data = matching_points[matching_points['period'] == 'reference']
+        post_data = matching_points[matching_points['period'] == 'post']
+        
+        if len(ref_data) == 0 or len(post_data) == 0:
+            continue
+        
+        # Process each polarization separately
+        for pol in ['VV', 'VH']:
+            ref_pol = ref_data[ref_data['polarization'] == pol]
+            post_pol = post_data[post_data['polarization'] == pol]
+            
+            if len(ref_pol) == 0 or len(post_pol) == 0:
+                continue
+            
+            # Extract features
+            features = {
+                'point_id': idx,
+                'lon': row['lon'],
+                'lat': row['lat'],
+                'is_damaged': row['is_damaged'],
+                'polarization': pol,
+                
+                # Reference period statistics
+                'ref_mean': ref_pol['backscatter'].mean(),
+                'ref_std': ref_pol['backscatter'].std() if len(ref_pol) > 1 else 0,
+                'ref_min': ref_pol['backscatter'].min(),
+                'ref_max': ref_pol['backscatter'].max(),
+                'ref_range': ref_pol['backscatter'].max() - ref_pol['backscatter'].min(),
+                'ref_count': len(ref_pol),
+                
+                # Post period statistics
+                'post_mean': post_pol['backscatter'].mean(),
+                'post_std': post_pol['backscatter'].std() if len(post_pol) > 1 else 0,
+                'post_min': post_pol['backscatter'].min(),
+                'post_max': post_pol['backscatter'].max(),
+                'post_range': post_pol['backscatter'].max() - post_pol['backscatter'].min(),
+                'post_count': len(post_pol),
+                
+                # Change metrics
+                'change_mean': post_pol['backscatter'].mean() - ref_pol['backscatter'].mean(),
+                'change_std': post_pol['backscatter'].std() - ref_pol['backscatter'].std() if len(post_pol) > 1 and len(ref_pol) > 1 else 0,
+                'change_magnitude': abs(post_pol['backscatter'].mean() - ref_pol['backscatter'].mean()),
+                
+                # Statistical change metrics (similar to PWTT)
+                't_statistic': (post_pol['backscatter'].mean() - ref_pol['backscatter'].mean()) / 
+                              (((ref_pol['backscatter'].std()**2 / len(ref_pol)) + 
+                                (post_pol['backscatter'].std()**2 / len(post_pol)))**0.5) 
+                              if len(ref_pol) > 1 and len(post_pol) > 1 else 0
+            }
+            
+            # Add percent change (handling division by zero)
+            if ref_pol['backscatter'].mean() != 0:
+                features['percent_change'] = ((post_pol['backscatter'].mean() - ref_pol['backscatter'].mean()) / 
+                                             abs(ref_pol['backscatter'].mean())) * 100
+            else:
+                features['percent_change'] = 0
+                
+            # Add information about orbit if available
+            if 'orbit' in ref_pol.columns:
+                features['orbit'] = ref_pol['orbit'].iloc[0]
+                
+            # Add damage class information if available
+            if 'damage_class' in row and row['is_damaged'] == 1:
+                features['damage_class'] = row['damage_class'] 
+                features['damage_class_desc'] = row['damage_class_desc']
+                
+            all_features.append(features)
+    
+    # Create DataFrame
+    features_df = pd.DataFrame(all_features)
+    
+    return features_df
+
 def collect_all_backscatter_values_optimized(data_dir, aoi_path=None, polarizations=None, sample_rate=1.0):
     """
     Optimized function to collect backscatter values from all GeoTIFFs.
