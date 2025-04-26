@@ -338,7 +338,7 @@ def extract_pixel_timeseries(labeled_points, backscatter_data, buffer_distance=5
                 record = {
                     'point_id': idx,
                     'pixel_id': pixel_id,
-                    'date': row['backscatter_date'],
+                    #'date': row['backscatter_date'],
                     'polarization': row['polarization'],
                     'orbit': row['orbit'],
                     'period': row['period'],
@@ -365,18 +365,19 @@ def extract_pixel_timeseries(labeled_points, backscatter_data, buffer_distance=5
     
     return timeseries_df
 
-def create_timeseries_features(timeseries_df, reference_dates=None, assessment_dates=None):
+def create_timeseries_features(timeseries_df):
     """
     Create feature vectors from time series data as specified in the paper.
+    Each pixel+orbit combination will have one row with features from both polarizations.
+    The final feature vector is φ(xi) ∈ R^{4N} where N=7 (summary statistics).
     
     Parameters:
     -----------
     timeseries_df : DataFrame
-        Time series data from extract_pixel_timeseries function
         
     Returns:
     --------
-    DataFrame with feature vectors for each pixel/polarization/orbit combination
+    DataFrame with feature vectors for each pixel/orbit combination
     """
     print("Creating time series features...")
     
@@ -385,14 +386,10 @@ def create_timeseries_features(timeseries_df, reference_dates=None, assessment_d
     
     # Split data into reference and assessment periods
     ref_data = df[df['period'] == 'reference']
-    assess_data = df[df['period'] == 'post']
+    post_data = df[df['period'] == 'post']
     
     print(f"Reference period: {len(ref_data)} observations")
-    print(f"Assessment period: {len(assess_data)} observations")
-    
-    # Group by pixel, polarization, and orbit
-    # Each combination will get its own feature vector
-    features = []
+    print(f"Assessment period: {len(post_data)} observations")
     
     # Define the summary statistics to compute
     stats_functions = {
@@ -405,59 +402,82 @@ def create_timeseries_features(timeseries_df, reference_dates=None, assessment_d
         'skew': lambda x: stats.skew(x) if len(x) > 2 else 0
     }
     
-    # Group by pixel, polarization, and orbit
-    group_cols = ['pixel_id', 'polarization', 'orbit']
+    # Group by pixel and orbit (combining polarizations into one feature vector)
+    group_cols = ['pixel_id', 'orbit']
     
-    # Process each group
-    for name, group in tqdm(df.groupby(group_cols), 
-                            desc="Extracting features", 
-                            total=df.groupby(group_cols).ngroups):
-        
-        # Get reference and assessment data for this group
-        group_ref = group[group['period'] == 'reference']
-        group_assess = group[group['period'] == 'post']
-        
-        # Skip if we don't have data for both periods
-        if len(group_ref) == 0 or len(group_assess) == 0:
-            continue
+    # Store the results
+    features = []
+    
+    # Process each pixel+orbit group
+    for (pixel_id, orbit), group in tqdm(df.groupby(group_cols), 
+                                       desc="Extracting features", 
+                                       total=df.groupby(group_cols).ngroups):
         
         # Create feature record
-        feature_record = {}
-        
-        # Add identifying information
-        pixel_id, polarization, orbit = name
-        feature_record['pixel_id'] = pixel_id
-        feature_record['polarization'] = polarization
-        feature_record['orbit'] = orbit
+        feature_record = {
+            'pixel_id': pixel_id,
+            'orbit': orbit
+        }
         
         # Add point information (use the first point associated with this pixel)
         for col in ['point_id', 'point_lon', 'point_lat', 'is_damaged', 'damage_class', 'damage_class_desc']:
             if col in group.columns:
                 feature_record[col] = group[col].iloc[0]
         
-        # Calculate summary statistics for reference period
-        for stat_name, stat_func in stats_functions.items():
-            feature_record[f'ref_{stat_name}'] = stat_func(group_ref['backscatter'])
+        # Process each polarization separately, then combine into one feature vector
+        for pol in ['VV', 'VH']:
+            pol_group = group[group['polarization'] == pol]
+            
+            # Skip if we don't have this polarization
+            if len(pol_group) == 0:
+                continue
+                
+            # Get reference and assessment data for this polarization
+            pol_ref = pol_group[pol_group['period'] == 'reference']
+            pol_post = pol_group[pol_group['period'] == 'post']
+            
+            # Skip if we don't have data for both periods
+            if len(pol_ref) == 0 or len(pol_post) == 0:
+                continue
+            
+            # Calculate summary statistics for reference period
+            for stat_name, stat_func in stats_functions.items():
+                feature_record[f'ref_{pol}_{stat_name}'] = stat_func(pol_ref['backscatter'])
+            
+            # Calculate summary statistics for assessment period
+            for stat_name, stat_func in stats_functions.items():
+                feature_record[f'post_{pol}_{stat_name}'] = stat_func(pol_post['backscatter'])
+            
+            # Add observation counts
+            feature_record[f'ref_{pol}_count'] = len(pol_ref)
+            feature_record[f'post_{pol}_count'] = len(pol_post)
         
-        # Calculate summary statistics for assessment period
-        for stat_name, stat_func in stats_functions.items():
-            feature_record[f'assess_{stat_name}'] = stat_func(group_assess['backscatter'])
-        
-        # Calculate change metrics
-        feature_record['change_mean'] = feature_record['assess_mean'] - feature_record['ref_mean']
-        feature_record['change_median'] = feature_record['assess_median'] - feature_record['ref_median']
-        feature_record['change_std'] = feature_record['assess_std'] - feature_record['ref_std']
-        feature_record['change_magnitude'] = abs(feature_record['assess_mean'] - feature_record['ref_mean'])
-        feature_record['change_relative'] = feature_record['change_magnitude'] / abs(feature_record['ref_mean']) if feature_record['ref_mean'] != 0 else 0
-        
-        # Add observation counts
-        feature_record['ref_count'] = len(group_ref)
-        feature_record['assess_count'] = len(group_assess)
-        
-        features.append(feature_record)
+        # Make sure we have both polarizations
+        if (any(f'ref_VV_{stat}' in feature_record for stat in stats_functions) and 
+            any(f'ref_VH_{stat}' in feature_record for stat in stats_functions)):
+            features.append(feature_record)
     
     # Create DataFrame
     features_df = pd.DataFrame(features)
+    
+    # Calculate change metrics across polarizations (feature engineering)
+    for pol in ['VV', 'VH']:
+        # Skip if we don't have this polarization
+        if not any(f'ref_{pol}_mean' in col for col in features_df.columns):
+            continue
+            
+        features_df[f'change_{pol}_mean'] = features_df[f'post_{pol}_mean'] - features_df[f'ref_{pol}_mean']
+        features_df[f'change_{pol}_magnitude'] = abs(features_df[f'post_{pol}_mean'] - features_df[f'ref_{pol}_mean'])
+        features_df[f'change_{pol}_relative'] = (
+            features_df[f'change_{pol}_magnitude'] / abs(features_df[f'ref_{pol}_mean'].replace(0, np.nan)).fillna(1)
+        )
+        
+        # Cross-polarization metrics (only for VV, calculating VV/VH ratio)
+        if pol == 'VV' and 'ref_VH_mean' in features_df.columns:
+            # In dB, ratio is subtraction
+            features_df['ref_ratio'] = features_df['ref_VV_mean'] - features_df['ref_VH_mean']
+            features_df['post_ratio'] = features_df['post_VV_mean'] - features_df['post_VH_mean']
+            features_df['change_ratio'] = features_df['post_ratio'] - features_df['ref_ratio']
     
     print(f"Created {len(features_df)} feature vectors")
     

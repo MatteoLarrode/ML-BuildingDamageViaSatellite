@@ -389,9 +389,10 @@ def process_unosat_damage_labels(gdf, date_index=7, aoi_path=None, output_dir=".
     
     return cleaned_labels
 
-def create_control_points(damage_labels, aoi_path, min_distance=100, num_points=None):
+def create_control_points(damage_labels, aoi_path, buildings_path, min_distance=100, num_points=None):
     """
     Generate control points away from damaged areas to serve as negative examples
+    Ensures all points are within building footprints
     
     Parameters:
     -----------
@@ -399,6 +400,8 @@ def create_control_points(damage_labels, aoi_path, min_distance=100, num_points=
         GeoDataFrame with damage labels
     aoi_path : str
         Path to AOI GeoJSON file
+    buildings_path : str
+        Path to building footprints GeoPackage or GeoJSON
     min_distance : float, default=100
         Minimum distance (meters) from any damage point
     num_points : int, optional
@@ -412,6 +415,7 @@ def create_control_points(damage_labels, aoi_path, min_distance=100, num_points=
     import geopandas as gpd
     from shapely.geometry import Point
     import random
+    from tqdm.notebook import tqdm
     
     # Set number of points to match damage points if not specified
     if num_points is None:
@@ -422,12 +426,29 @@ def create_control_points(damage_labels, aoi_path, min_distance=100, num_points=
     # Load AOI
     aoi = gpd.read_file(aoi_path)
     
+    # Load building footprints
+    print("Loading building footprints...")
+    buildings = gpd.read_file(buildings_path)
+    
+    # Drop any columns that might cause conflicts in spatial joins
+    if 'index_right' in buildings.columns:
+        buildings = buildings.drop(columns=['index_right'])
+    if 'index' in buildings.columns:
+        buildings = buildings.drop(columns=['index'])
+    
     # Make sure CRS matches
     if aoi.crs != damage_labels.crs:
         aoi = aoi.to_crs(damage_labels.crs)
     
+    if buildings.crs != damage_labels.crs:
+        buildings = buildings.to_crs(damage_labels.crs)
+    
     # Get AOI boundary as a single geometry
     aoi_boundary = aoi.unary_union
+    
+    # Filter buildings to only those within AOI
+    buildings = buildings[buildings.intersects(aoi_boundary)]
+    print(f"Found {len(buildings)} buildings within AOI")
     
     # Create a buffer around all damage points
     print("Creating damage buffer zone...")
@@ -446,41 +467,113 @@ def create_control_points(damage_labels, aoi_path, min_distance=100, num_points=
         damage_buffer_gdf = gpd.GeoDataFrame(geometry=[damage_buffer], crs="EPSG:32636")
         damage_buffer = damage_buffer_gdf.to_crs(damage_labels.crs).geometry[0]
     
-    # Generate random points within the AOI but outside damage zones
+    # Remove buildings that intersect with damage buffer
+    safe_buildings = buildings[~buildings.intersects(damage_buffer)]
+    print(f"Found {len(safe_buildings)} buildings outside damage buffer")
+    
+    if len(safe_buildings) == 0:
+        print("WARNING: No buildings found outside the damage buffer. Try reducing the buffer distance.")
+        return gpd.GeoDataFrame(geometry=[], crs=damage_labels.crs)
+    
+    # Approach 1: Use building centroids
     control_points = []
-    num_attempts = 0
+    building_info = []
     
-    print("Generating random points...")
-    while len(control_points) < num_points and num_attempts < 50000:
-        num_attempts += 1
-        
-        if num_attempts % 5000 == 0:
-            print(f"  Made {num_attempts} attempts, found {len(control_points)} valid points...")
-        
-        # Get AOI bounds
-        minx, miny, maxx, maxy = aoi_boundary.bounds
-        
-        # Generate random point within bounds
-        x = random.uniform(minx, maxx)
-        y = random.uniform(miny, maxy)
-        point = Point(x, y)
-        
-        # Check if point is within AOI boundary but outside damage buffer
-        if point.within(aoi_boundary) and not point.within(damage_buffer):
-            control_points.append(point)
+    print("Generating control points from building centroids...")
+    # Get centroids of safe buildings
     
-    print(f"Found {len(control_points)} valid control points after {num_attempts} attempts")
+    # If we have more buildings than needed points, sample randomly
+    if len(safe_buildings) > num_points:
+        indices = random.sample(range(len(safe_buildings)), num_points)
+        sampled_buildings = safe_buildings.iloc[indices]
+    else:
+        # Use all available buildings
+        sampled_buildings = safe_buildings
     
-    # Create GeoDataFrame of control points
-    control_gdf = gpd.GeoDataFrame(
-        {'geometry': control_points},
-        crs=damage_labels.crs
-    )
+    for idx, building in sampled_buildings.iterrows():
+        # Use the centroid of the building
+        centroid = building.geometry.centroid
+        control_points.append(centroid)
+        
+        # Store building attributes
+        attrs = {}
+        for col in building.index:
+            if col != 'geometry' and not pd.isna(building[col]):
+                attrs[col] = building[col]
+        building_info.append(attrs)
     
-    # Add columns for consistency
-    control_gdf['is_damaged'] = 0
-    control_gdf['damage_class'] = 6  # "No Visible Damage"
-    control_gdf['damage_class_desc'] = 'No Visible Damage'
+    # If we need more points than available buildings
+    remaining = num_points - len(control_points)
+    if remaining > 0:
+        print(f"Need {remaining} more points. Generating random points within buildings...")
+        
+        # For simplicity, convert to 2D if they're 3D geometries
+        if any(getattr(geom, 'has_z', False) for geom in safe_buildings.geometry):
+            safe_buildings.geometry = safe_buildings.geometry.apply(lambda geom: geom.simplify(0))
+        
+        # Get the total area of all safe buildings to weight sampling
+        safe_buildings['area'] = safe_buildings.geometry.area
+        total_area = safe_buildings['area'].sum()
+        
+        # Create probability weights based on building area
+        safe_buildings['probability'] = safe_buildings['area'] / total_area
+        
+        # Generate random points inside randomly selected buildings
+        attempts = 0
+        pbar = tqdm(total=remaining)
+        while len(control_points) < num_points and attempts < 50000:
+            attempts += 1
+            
+            # Randomly select a building, weighted by area
+            building_idx = random.choices(
+                range(len(safe_buildings)), 
+                weights=safe_buildings['probability'],
+                k=1
+            )[0]
+            
+            building = safe_buildings.iloc[building_idx]
+            
+            # Try to generate a random point within this building
+            minx, miny, maxx, maxy = building.geometry.bounds
+            
+            # Generate random point within building bounds
+            x = random.uniform(minx, maxx)
+            y = random.uniform(miny, maxy)
+            point = Point(x, y)
+            
+            # Check if point is within the building
+            if point.within(building.geometry):
+                control_points.append(point)
+                
+                # Store building attributes
+                attrs = {}
+                for col in building.index:
+                    if col != 'geometry' and not pd.isna(building[col]):
+                        attrs[col] = building[col]
+                building_info.append(attrs)
+                
+                pbar.update(1)
+        
+        pbar.close()
+    
+    print(f"Generated {len(control_points)} control points within buildings")
+    
+    # Create GeoDataFrame of control points with building attributes
+    control_data = []
+    for i, (point, attrs) in enumerate(zip(control_points, building_info)):
+        point_data = {
+            'geometry': point,
+            'is_damaged': 0,
+            'damage_class': 6,  # "No Visible Damage"
+            'damage_class_desc': 'No Visible Damage'
+        }
+        # Add building attributes
+        point_data.update(attrs)
+        control_data.append(point_data)
+    
+    control_gdf = gpd.GeoDataFrame(control_data, crs=damage_labels.crs)
+    
+    # Add coordinates
     control_gdf['lon'] = control_gdf.geometry.x
     control_gdf['lat'] = control_gdf.geometry.y
     
