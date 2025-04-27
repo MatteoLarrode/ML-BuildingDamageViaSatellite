@@ -18,4 +18,4 @@ dependencies:
   - rasterio
   - pip:
     - snappy
-prefix: /opt/anaconda3/envs/ML-summative
+prefix: /opt/anaconda3/envs/ML-s
