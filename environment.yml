@@ -16,6 +16,7 @@ dependencies:
   - tqdm
   - fiona
   - rasterio
+  - pyarrow
   - pip:
     - snappy
-prefix: /opt/anaconda3/envs/ML-s
+prefix: /opt/anaconda3/envs/ML-summative
