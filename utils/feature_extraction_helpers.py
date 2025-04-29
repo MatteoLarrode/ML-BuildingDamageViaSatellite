@@ -620,27 +620,6 @@ def extract_ml_features_stable(stable_timeseries):
                 feature_record[f'{pol}_{orbit}_std_ratio'] = post_data.std() / ref_data.std()
             else:
                 feature_record[f'{pol}_{orbit}_std_ratio'] = np.nan
-            
-            # Statistical tests
-            # T-test (from Ballinger paper)
-            t_stat, p_value = stats.ttest_ind(post_data, ref_data, equal_var=False)
-            feature_record[f'{pol}_{orbit}_ttest_stat'] = t_stat
-            feature_record[f'{pol}_{orbit}_ttest_pvalue'] = p_value
-            
-            # Kolmogorov-Smirnov test for distribution changes
-            ks_stat, ks_pvalue = stats.ks_2samp(post_data, ref_data)
-            feature_record[f'{pol}_{orbit}_ks_stat'] = ks_stat
-            feature_record[f'{pol}_{orbit}_ks_pvalue'] = ks_pvalue
-            
-            # Mann-Whitney U test for median differences
-            u_stat, u_pvalue = stats.mannwhitneyu(post_data, ref_data, alternative='two-sided')
-            feature_record[f'{pol}_{orbit}_mw_stat'] = u_stat
-            feature_record[f'{pol}_{orbit}_mw_pvalue'] = u_pvalue
-            
-        # Add combined features (maximum absolute t-statistic across all polarization/orbit combinations)
-        t_stats = [abs(v) for k, v in feature_record.items() if k.endswith('_ttest_stat')]
-        if t_stats:
-            feature_record['max_abs_tstat'] = max(t_stats)
         
         feature_records.append(feature_record)
     
