@@ -1,0 +1,8 @@
+{
+"type": "FeatureCollection",
+"name": "aoi_khan_younis",
+"crs": { "type": "name", "properties": { "name": "urn:ogc:def:crs:OGC:1.3:CRS84" } },
+"features": [
+{ "type": "Feature", "properties": { }, "geometry": { "type": "Polygon", "coordinates": [ [ [ 34.290486486486486, 31.329986486486487 ], [ 34.317513513513518, 31.329986486486487 ], [ 34.317513513513518, 31.357013513513511 ], [ 34.290486486486486, 31.357013513513511 ], [ 34.290486486486486, 31.329986486486487 ] ] ] } }
+]
+}

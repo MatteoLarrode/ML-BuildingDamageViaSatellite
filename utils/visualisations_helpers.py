@@ -9,6 +9,8 @@ import matplotlib.pyplot as plt
 import matplotlib.font_manager as font_manager
 import re
 from IPython.display import display, Markdown
+from sklearn.metrics import roc_curve, auc, precision_recall_curve
+from sklearn.metrics import precision_score, recall_score, f1_score, accuracy_score
 
 def set_visualization_style():
     plt.style.use('seaborn-v0_8-colorblind')
@@ -267,3 +269,248 @@ def plot_backscatter_timeseries_by_id(timeseries, point_ids, max_points=2, save_
     plt.show()
     
     return
+
+def create_desc_stats(df):
+    # Group features
+    polarizations = ['VH', 'VV']
+    orbits = ['ASC', 'DESC']
+    periods = ['ref', 'post']
+    stats = ['mean', 'median', 'min', 'max', 'std']
+    
+    # Initialize columns for the table
+    columns = ['Orbit', 'Polarization', 'Statistic']
+    for period in periods:
+        columns.append(f'Undamaged {period.capitalize()} (mean ± std)')
+        columns.append(f'Damaged {period.capitalize()} (mean ± std)')
+    
+    # Create empty lists for each column
+    data = {col: [] for col in columns}
+    
+    # Fill the table
+    for orbit in orbits:
+        for pol in polarizations:
+            for stat in stats:
+                # Add identifiers
+                data['Orbit'].append(orbit)
+                data['Polarization'].append(pol)
+                data['Statistic'].append(stat)
+                
+                # Add values for each period and damage status
+                for period in periods:
+                    feature = f"{pol}_{orbit}_{period}_{stat}"
+                    
+                    # For undamaged
+                    undamaged_mean = df[df['is_damaged'] == 0][feature].mean()
+                    undamaged_std = df[df['is_damaged'] == 0][feature].std()
+                    data[f'Undamaged {period.capitalize()} (mean ± std)'].append(
+                        f"{undamaged_mean:.4f} ± {undamaged_std:.4f}")
+                    
+                    # For damaged
+                    damaged_mean = df[df['is_damaged'] == 1][feature].mean()
+                    damaged_std = df[df['is_damaged'] == 1][feature].std()
+                    data[f'Damaged {period.capitalize()} (mean ± std)'].append(
+                        f"{damaged_mean:.4f} ± {damaged_std:.4f}")
+    
+    # Create DataFrame
+    stats_df = pd.DataFrame(data)
+    
+    # Add sample size information at the top
+    n_undamaged = df[df['is_damaged'] == 0].shape[0]
+    n_damaged = df[df['is_damaged'] == 1].shape[0]
+    sample_info = pd.DataFrame({
+        'Orbit': ['Sample Size'],
+        'Polarization': [''],
+        'Statistic': ['Count'],
+        'Undamaged Ref (mean ± std)': [f"{n_undamaged}"],
+        'Damaged Ref (mean ± std)': [f"{n_damaged}"],
+        'Undamaged Post (mean ± std)': [f"{n_undamaged}"],
+        'Damaged Post (mean ± std)': [f"{n_damaged}"]
+    })
+    
+    # Combine and return
+    final_df = pd.concat([sample_info, stats_df], ignore_index=True)
+    return final_df
+
+def create_latex_descriptive_table(df):
+    # Prepare data
+    orbits = ['ASC', 'DESC']
+    polarizations = ['VH', 'VV']
+    stats = ['mean', 'median', 'min', 'max', 'std']
+    periods = ['ref', 'post']
+    
+    # Start building the LaTeX table
+    latex_table = [
+        "\\begin{table}[htbp]",
+        "\\centering",
+        "\\caption{Descriptive statistics of SAR features by damage status}",
+        "\\label{tab:desc-stats}",
+        "\\small",
+        "\\begin{tabular}{llc|cc|cc}",
+        "\\toprule",
+        " & & & \\multicolumn{2}{c|}{\\textbf{Undamaged}} & \\multicolumn{2}{c}{\\textbf{Damaged}} \\\\",
+        "\\cmidrule(lr){4-5} \\cmidrule(lr){6-7}",
+        "\\textbf{Orbit} & \\textbf{Polarization} & \\textbf{Statistic} & \\textbf{Reference} & \\textbf{Post} & \\textbf{Reference} & \\textbf{Post} \\\\"
+    ]
+    
+    # Sample size row
+    n_undamaged = df[df['is_damaged'] == 0].shape[0]
+    n_damaged = df[df['is_damaged'] == 1].shape[0]
+    latex_table.append("\\midrule")
+    latex_table.append(f"\\multicolumn{{3}}{{l}}{{\\textbf{{Sample Size}}}} & {n_undamaged} & {n_undamaged} & {n_damaged} & {n_damaged} \\\\")
+    
+    # Add data rows
+    for orbit in orbits:
+        # Add orbit header
+        latex_table.append("\\midrule")
+        latex_table.append(f"\\multicolumn{{7}}{{l}}{{\\textbf{{{orbit} orbit}}}} \\\\")
+        
+        for pol in polarizations:
+            # Add polarization header
+            latex_table.append("\\midrule")
+            latex_table.append(f"\\multicolumn{{1}}{{l}}{{}} & \\multicolumn{{6}}{{l}}{{\\textbf{{{pol} polarization}}}} \\\\")
+            
+            for stat in stats:
+                # Get values for each combination
+                ref_undamaged_mean = df[(df['is_damaged'] == 0)][f"{pol}_{orbit}_ref_{stat}"].mean()
+                ref_undamaged_std = df[(df['is_damaged'] == 0)][f"{pol}_{orbit}_ref_{stat}"].std()
+                post_undamaged_mean = df[(df['is_damaged'] == 0)][f"{pol}_{orbit}_post_{stat}"].mean()
+                post_undamaged_std = df[(df['is_damaged'] == 0)][f"{pol}_{orbit}_post_{stat}"].std()
+                
+                ref_damaged_mean = df[(df['is_damaged'] == 1)][f"{pol}_{orbit}_ref_{stat}"].mean()
+                ref_damaged_std = df[(df['is_damaged'] == 1)][f"{pol}_{orbit}_ref_{stat}"].std()
+                post_damaged_mean = df[(df['is_damaged'] == 1)][f"{pol}_{orbit}_post_{stat}"].mean()
+                post_damaged_std = df[(df['is_damaged'] == 1)][f"{pol}_{orbit}_post_{stat}"].std()
+                
+                # Format the values
+                ref_undamaged = f"{ref_undamaged_mean:.4f} $\\pm$ {ref_undamaged_std:.4f}"
+                post_undamaged = f"{post_undamaged_mean:.4f} $\\pm$ {post_undamaged_std:.4f}"
+                ref_damaged = f"{ref_damaged_mean:.4f} $\\pm$ {ref_damaged_std:.4f}"
+                post_damaged = f"{post_damaged_mean:.4f} $\\pm$ {post_damaged_std:.4f}"
+                
+                # Add row
+                latex_table.append(f" & & {stat} & {ref_undamaged} & {post_undamaged} & {ref_damaged} & {post_damaged} \\\\")
+    
+    # Close the table
+    latex_table.extend([
+        "\\bottomrule",
+        "\\end{tabular}",
+        "\\end{table}"
+    ])
+    
+    return "\n".join(latex_table)
+
+def plot_performance_curves(y_true, y_pred_proba, save_path=None):
+   """
+   Plot ROC curve and Precision-Recall curve side by side
+   
+   Parameters:
+   -----------
+   y_true : array-like
+       True binary labels
+   y_pred_proba : array-like
+       Predicted probabilities for the positive class
+   save_path : str, optional
+       Path to save the figure
+   """
+   set_visualization_style()
+
+   # Set up figure
+   fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+   
+   # Plot ROC curve
+   fpr, tpr, _ = roc_curve(y_true, y_pred_proba)
+   roc_auc = auc(fpr, tpr)
+   
+   axes[0].plot(fpr, tpr, color='blue', lw=2, 
+                label=f'ROC curve (AUC = {roc_auc:.2f})')
+   axes[0].plot([0, 1], [0, 1], color='gray', linestyle='--')
+   axes[0].set_xlim([0.0, 1.0])
+   axes[0].set_ylim([0.0, 1.05])
+   axes[0].set_xlabel('False Positive Rate')
+   axes[0].set_ylabel('True Positive Rate')
+   axes[0].set_title('ROC Curve')
+   axes[0].legend(loc="lower right")
+   axes[0].grid(True, alpha=0.3)
+   
+   # Plot Precision-Recall curve
+   precision, recall, _ = precision_recall_curve(y_true, y_pred_proba)
+   pr_auc = auc(recall, precision)
+   
+   axes[1].plot(recall, precision, color='green', lw=2,
+                label=f'PR curve (AP = {pr_auc:.2f})')
+   # Add baseline based on class balance
+   baseline = sum(y_true) / len(y_true)
+   axes[1].plot([0, 1], [baseline, baseline], color='gray', linestyle='--')
+   
+   axes[1].set_xlim([0.0, 1.0])
+   axes[1].set_ylim([0.0, 1.05])
+   axes[1].set_xlabel('Recall')
+   axes[1].set_ylabel('Precision')
+   axes[1].set_title('Precision-Recall Curve')
+   axes[1].legend(loc="lower left")
+   axes[1].grid(True, alpha=0.3)
+   
+   plt.tight_layout()
+   
+   if save_path:
+       plt.savefig(save_path, dpi=300, bbox_inches='tight')
+   
+   return fig, axes
+
+def plot_metrics_vs_threshold(y_true, y_pred_proba, save_path=None):
+   """
+   Plot evaluation metrics vs decision threshold
+   
+   Parameters:
+   -----------
+   y_true : array-like
+       True binary labels
+   y_pred_proba : array-like
+       Predicted probabilities for the positive class
+   save_path : str, optional
+       Path to save the figure
+   """
+   set_visualization_style()
+   # Define thresholds to evaluate (from 0.1 to 0.9 as requested)
+   thresholds = np.linspace(0.1, 0.9, 101)
+   
+   # Store metrics
+   precisions = []
+   recalls = []
+   f1s = []
+   accuracies = []
+   
+   # Calculate metrics for each threshold
+   for threshold in thresholds:
+       y_pred_thresh = (y_pred_proba >= threshold).astype(int)
+       precisions.append(precision_score(y_true, y_pred_thresh, zero_division=0))
+       recalls.append(recall_score(y_true, y_pred_thresh))
+       f1s.append(f1_score(y_true, y_pred_thresh))
+       accuracies.append(accuracy_score(y_true, y_pred_thresh))
+   
+   # Create figure
+   fig, ax = plt.subplots(figsize=(10, 5))
+   
+   # Plot metrics
+   ax.plot(thresholds, precisions, label='Precision', linewidth=2)
+   ax.plot(thresholds, recalls, label='Recall', linewidth=2)
+   ax.plot(thresholds, f1s, label='F1 Score', linewidth=2)
+   ax.plot(thresholds, accuracies, label='Accuracy', linewidth=2)
+   
+   # Add vertical line for default threshold
+   ax.axvline(x=0.5, color='grey', linestyle='--', label='Threshold = 0.5')
+   
+   # Formatting
+   ax.set_xlabel('Decision Threshold', fontsize=12)
+   ax.set_ylabel('Score', fontsize=12)
+   ax.set_xlim([0.1, 0.9])
+   ax.set_ylim([0, 1.05])
+   ax.legend(loc='best', fontsize=11)
+   ax.grid(True, alpha=0.3)
+   
+   plt.tight_layout()
+   
+   if save_path:
+       plt.savefig(save_path, dpi=300, bbox_inches='tight')
+   
+   return fig, ax
